@@ -306,7 +306,6 @@ function CreateInvoiceModal({ customers, products, onClose, onSaved }: {
         subtotal,
         total_amount: totalAmount,
         amount_paid: amountPaid,
-        balance_due: totalAmount - amountPaid,
         status: amountPaid >= totalAmount ? 'paid' : (amountPaid > 0 ? 'partially_paid' : 'draft'),
         is_pos: false,
         notes: form.notes || null,
@@ -328,6 +327,39 @@ function CreateInvoiceModal({ customers, products, onClose, onSaved }: {
 
     const { error: itemsError } = await supabase.from('invoice_items').insert(invoiceItems);
     if (itemsError) { setError(itemsError.message); setSaving(false); return; }
+
+    // Update stock for each invoice item
+    for (const item of items) {
+      const product = products.find(p => p.id === item.product_id);
+      // Find inventory for this product
+      const { data: invData } = await supabase
+        .from('inventory_items')
+        .select('id, quantity_on_hand, warehouse_id')
+        .eq('product_id', item.product_id)
+        .limit(1);
+
+      if (invData && invData.length > 0) {
+        const inv = invData[0];
+        const newQty = Math.max(0, (inv.quantity_on_hand || 0) - item.quantity);
+        await supabase
+          .from('inventory_items')
+          .update({ quantity_on_hand: newQty, updated_at: new Date().toISOString() })
+          .eq('id', inv.id);
+
+        // Record stock movement
+        await supabase.from('stock_movements').insert({
+          product_id: item.product_id,
+          warehouse_id: inv.warehouse_id,
+          movement_type: 'sale',
+          quantity: -item.quantity,
+          unit_cost: product?.cost_price || 0,
+          reference_type: 'invoice',
+          reference_id: invoice.id,
+          reference_number: invoiceNumber,
+          notes: 'Invoice sale',
+        });
+      }
+    }
 
     // Record payment if full or partial
     if (amountPaid > 0) {

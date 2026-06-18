@@ -79,12 +79,82 @@ export default function PurchasesPage() {
       .eq('id', order.id);
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
-    } else {
-      toast({ title: 'Success', description: `Order ${newStatus === 'approved' ? 'approved' : newStatus}` });
-      loadData();
-      if (viewingOrder?.id === order.id) {
-        setViewingOrder({ ...viewingOrder, status: newStatus });
+      return;
+    }
+
+    // If marking as received, add stock to inventory
+    if (newStatus === 'received' || newStatus === 'partially_received') {
+      const { data: poItems } = await supabase
+        .from('purchase_order_items')
+        .select('*, product_id, quantity, unit_cost')
+        .eq('purchase_order_id', order.id);
+
+      for (const item of poItems || []) {
+        // Find existing inventory for this product
+        const { data: invData } = await supabase
+          .from('inventory_items')
+          .select('id, quantity_on_hand')
+          .eq('product_id', item.product_id)
+          .limit(1);
+
+        if (invData && invData.length > 0) {
+          // Update existing inventory
+          const currentQty = invData[0].quantity_on_hand || 0;
+          await supabase
+            .from('inventory_items')
+            .update({
+              quantity_on_hand: currentQty + Number(item.quantity),
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', invData[0].id);
+        } else {
+          // Find default warehouse
+          const { data: whData } = await supabase
+            .from('warehouses')
+            .select('id')
+            .eq('is_default', true)
+            .limit(1);
+
+          const warehouseId = whData && whData.length > 0 ? whData[0].id : null;
+          if (warehouseId) {
+            await supabase.from('inventory_items').insert({
+              product_id: item.product_id,
+              warehouse_id: warehouseId,
+              quantity_on_hand: Number(item.quantity),
+              quantity_reserved: 0,
+              quantity_incoming: 0,
+            });
+          }
+        }
+
+        // Record stock movement
+        const { data: warehouse } = await supabase
+          .from('warehouses')
+          .select('id')
+          .eq('is_default', true)
+          .limit(1);
+        const warehouseId = warehouse && warehouse.length > 0 ? warehouse[0].id : null;
+
+        if (warehouseId) {
+          await supabase.from('stock_movements').insert({
+            product_id: item.product_id,
+            warehouse_id: warehouseId,
+            movement_type: 'purchase',
+            quantity: Number(item.quantity),
+            unit_cost: item.unit_cost,
+            reference_type: 'purchase_order',
+            reference_id: order.id,
+            reference_number: order.po_number,
+            notes: 'Purchase received',
+          });
+        }
       }
+    }
+
+    toast({ title: 'Success', description: `Order ${newStatus === 'approved' ? 'approved' : newStatus}` });
+    loadData();
+    if (viewingOrder?.id === order.id) {
+      setViewingOrder({ ...viewingOrder, status: newStatus });
     }
   }
 

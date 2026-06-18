@@ -13,14 +13,33 @@ interface CartItem {
   sale_price: number;
   quantity: number;
   image_url?: string;
+  inventory_item_id?: string;
+  warehouse_id?: string;
+  stock_available: number;
 }
 
+interface ProductData {
+  id: string;
+  name: string;
+  sku: string;
+  sale_price: number;
+  cost_price: number;
+  image_url?: string;
+  inventory_items: {
+    id: string;
+    warehouse_id: string;
+    quantity_on_hand: number;
+  }[];
+}
+
+const WALK_IN_CUSTOMER_ID = '00000000-0000-0000-0000-000000000001';
+
 export default function POSPage() {
-  const [products, setProducts] = useState<any[]>([]);
+  const [products, setProducts] = useState<ProductData[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
-  const [selectedCustomer, setSelectedCustomer] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState(WALK_IN_CUSTOMER_ID);
   const [customers, setCustomers] = useState<any[]>([]);
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [discount, setDiscount] = useState(0);
@@ -35,13 +54,21 @@ export default function POSPage() {
 
   async function loadProducts() {
     setLoading(true);
-    const { data } = await supabase.from('products').select('*, inventory_items(quantity_on_hand)').eq('is_active', true).limit(100);
-    setProducts(data || []);
+    const { data } = await supabase
+      .from('products')
+      .select('id, name, sku, sale_price, cost_price, image_url, inventory_items(id, warehouse_id, quantity_on_hand)')
+      .eq('is_active', true)
+      .limit(100);
+    setProducts((data || []) as ProductData[]);
     setLoading(false);
   }
 
   async function loadCustomers() {
-    const { data } = await supabase.from('customers').select('id, name, code').eq('is_active', true).limit(100);
+    const { data } = await supabase
+      .from('customers')
+      .select('id, name, code')
+      .eq('is_active', true)
+      .limit(100);
     setCustomers(data || []);
   }
 
@@ -49,16 +76,53 @@ export default function POSPage() {
     !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase())
   );
 
-  function addToCart(product: any) {
+  function addToCart(product: ProductData) {
+    // Find the inventory item with the most stock
+    const invItems = product.inventory_items || [];
+    const bestInv = invItems.length > 0
+      ? invItems.reduce((a, b) => (a.quantity_on_hand > b.quantity_on_hand ? a : b))
+      : null;
+
+    const stockAvailable = bestInv ? bestInv.quantity_on_hand : 0;
+
+    if (stockAvailable <= 0) {
+      toast({ title: 'Out of stock', description: `${product.name} is not available`, variant: 'destructive' });
+      return;
+    }
+
     setCart(prev => {
       const existing = prev.find(i => i.id === product.id);
-      if (existing) return prev.map(i => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
-      return [...prev, { id: product.id, name: product.name, sku: product.sku, sale_price: product.sale_price, quantity: 1, image_url: product.image_url }];
+      if (existing) {
+        if (existing.quantity >= stockAvailable) {
+          toast({ title: 'Stock limit', description: `Only ${stockAvailable} available`, variant: 'destructive' });
+          return prev;
+        }
+        return prev.map(i => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
+      }
+      return [...prev, {
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        sale_price: product.sale_price,
+        quantity: 1,
+        image_url: product.image_url,
+        inventory_item_id: bestInv?.id,
+        warehouse_id: bestInv?.warehouse_id,
+        stock_available: stockAvailable,
+      }];
     });
   }
 
   function updateQty(id: string, delta: number) {
-    setCart(prev => prev.map(i => i.id === id ? { ...i, quantity: Math.max(1, i.quantity + delta) } : i).filter(i => i.quantity > 0));
+    setCart(prev => prev.map(i => {
+      if (i.id !== id) return i;
+      const newQty = Math.max(0, i.quantity + delta);
+      if (newQty > i.stock_available) {
+        toast({ title: 'Stock limit', description: `Only ${i.stock_available} available`, variant: 'destructive' });
+        return i;
+      }
+      return { ...i, quantity: newQty };
+    }).filter(i => i.quantity > 0));
   }
 
   function removeFromCart(id: string) {
@@ -77,18 +141,19 @@ export default function POSPage() {
       const invoiceNumber = `POS-${Date.now().toString().slice(-8)}`;
       setLastInvoiceNumber(invoiceNumber);
 
+      const customerId = selectedCustomer || WALK_IN_CUSTOMER_ID;
+
       const { data: invoice, error: invError } = await supabase
         .from('invoices')
         .insert({
           invoice_number: invoiceNumber,
-          customer_id: selectedCustomer || null,
+          customer_id: customerId,
           invoice_date: new Date().toISOString().split('T')[0],
           subtotal: subtotal,
           discount_amount: discountAmount,
           tax_amount: 0,
           total_amount: total,
           amount_paid: total,
-          balance_due: 0,
           status: 'paid',
           is_pos: true,
         })
@@ -96,6 +161,7 @@ export default function POSPage() {
         .single();
 
       if (invError) throw invError;
+      if (!invoice) throw new Error('Invoice not created');
 
       const invoiceItems = cart.map(item => ({
         invoice_id: invoice.id,
@@ -110,12 +176,77 @@ export default function POSPage() {
       const { error: itemsError } = await supabase.from('invoice_items').insert(invoiceItems);
       if (itemsError) throw itemsError;
 
+      // Record payment
+      const { error: payError } = await supabase.from('payments').insert({
+        payment_number: `PAY-${Date.now().toString().slice(-6)}`,
+        payment_type: 'received',
+        reference_type: 'invoice',
+        reference_id: invoice.id,
+        customer_id: customerId,
+        amount: total,
+        payment_method: paymentMethod,
+        payment_date: new Date().toISOString().split('T')[0],
+        notes: 'POS sale',
+      });
+      if (payError) console.error('Payment record error:', payError.message);
+
+      // Update stock for each cart item
+      for (const item of cart) {
+        if (item.inventory_item_id && item.warehouse_id) {
+          // Deduct stock from inventory
+          const { data: invData } = await supabase
+            .from('inventory_items')
+            .select('quantity_on_hand')
+            .eq('id', item.inventory_item_id)
+            .single();
+
+          if (invData) {
+            const newQty = Math.max(0, (invData.quantity_on_hand || 0) - item.quantity);
+            await supabase
+              .from('inventory_items')
+              .update({ quantity_on_hand: newQty, updated_at: new Date().toISOString() })
+              .eq('id', item.inventory_item_id);
+          }
+
+          // Record stock movement
+          const product = products.find(p => p.id === item.id);
+          await supabase.from('stock_movements').insert({
+            product_id: item.id,
+            warehouse_id: item.warehouse_id,
+            movement_type: 'sale',
+            quantity: -item.quantity,
+            unit_cost: product?.cost_price || 0,
+            reference_type: 'invoice',
+            reference_id: invoice.id,
+            reference_number: invoiceNumber,
+            notes: 'POS sale',
+          });
+        }
+      }
+
+      // Update customer total purchases
+      if (customerId !== WALK_IN_CUSTOMER_ID) {
+        const { data: custData } = await supabase
+          .from('customers')
+          .select('total_purchases')
+          .eq('id', customerId)
+          .single();
+        if (custData) {
+          await supabase
+            .from('customers')
+            .update({ total_purchases: (custData.total_purchases || 0) + total })
+            .eq('id', customerId);
+        }
+      }
+
       setCart([]);
       setDiscount(0);
-      setSelectedCustomer('');
+      setSelectedCustomer(WALK_IN_CUSTOMER_ID);
       setOrderComplete(true);
       toast({ title: 'Success', description: `Order ${invoiceNumber} completed successfully` });
+      loadProducts();
     } catch (error: any) {
+      console.error('POS error:', error);
       toast({ title: 'Error', description: error.message || 'Failed to process order', variant: 'destructive' });
     }
 
@@ -144,7 +275,7 @@ export default function POSPage() {
             />
           </div>
           <select value={selectedCustomer} onChange={e => setSelectedCustomer(e.target.value)} className="border border-border rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none min-w-[180px]">
-            <option value="">Walk-in Customer</option>
+            <option value={WALK_IN_CUSTOMER_ID}>Walk-in Customer</option>
             {customers.map(c => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
           </select>
         </div>
@@ -156,11 +287,14 @@ export default function POSPage() {
             <div className="col-span-full text-center py-12 text-muted-foreground">No products found</div>
           ) : filteredProducts.map(p => {
             const stock = p.inventory_items?.reduce((s: number, i: any) => s + Number(i.quantity_on_hand), 0) || 0;
+            const inCart = cart.find(c => c.id === p.id);
+            const cartQty = inCart ? inCart.quantity : 0;
+            const available = stock - cartQty;
             return (
               <button
                 key={p.id}
                 onClick={() => addToCart(p)}
-                disabled={stock === 0}
+                disabled={available <= 0}
                 className="bg-white rounded-xl border border-border p-3 text-left hover:border-blue-400 hover:shadow-md transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <div className="w-full h-20 bg-muted rounded-lg overflow-hidden mb-2">
@@ -170,7 +304,7 @@ export default function POSPage() {
                 <p className="text-[10px] text-muted-foreground mb-1">{p.sku}</p>
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-bold text-blue-600">{formatCurrency(p.sale_price)}</p>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${stock > 0 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'}`}>{stock}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${available > 0 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'}`}>{available}</span>
                 </div>
               </button>
             );

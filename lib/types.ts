@@ -54,6 +54,10 @@ export interface Product {
   category_id?: string;
   brand_id?: string;
   unit: string;
+  base_unit?: string;
+  enable_multi_unit?: boolean;
+  enable_colors?: boolean;
+  enable_sizes?: boolean;
   cost_price: number;
   sale_price: number;
   mrp?: number;
@@ -70,6 +74,46 @@ export interface Product {
   category?: Category;
   brand?: Brand;
   inventory_items?: InventoryItem[];
+  colors?: ProductColor[];
+  sizes?: ProductSize[];
+  units?: ProductUnit[];
+}
+
+export interface ProductColor {
+  id: string;
+  product_id: string;
+  name: string;
+  hex_code?: string;
+  image_url?: string;
+  is_default: boolean;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface ProductSize {
+  id: string;
+  product_id: string;
+  name: string;
+  dimensions?: string;
+  is_default: boolean;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface ProductUnit {
+  id: string;
+  product_id: string;
+  unit_name: string;
+  unit_short?: string;
+  conversion_factor: number;
+  is_base_unit: boolean;
+  is_sale_unit: boolean;
+  price: number;
+  cost_price: number;
+  barcode?: string;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
 }
 
 export interface Warehouse {
@@ -213,6 +257,9 @@ export interface InvoiceItem {
   discount_percent: number;
   tax_rate: number;
   subtotal: number;
+  unit_name?: string;
+  unit_conversion_factor?: number;
+  base_quantity?: number;
   product?: Product;
 }
 

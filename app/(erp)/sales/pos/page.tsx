@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/format';
 import { toast } from '@/hooks/use-toast';
-import { Search, Plus, Minus, Trash2, ShoppingCart, CreditCard, Banknote, Smartphone, CheckCircle2, X, Receipt } from 'lucide-react';
+import { Search, Plus, Minus, Trash2, ShoppingCart, CreditCard, Banknote, Smartphone, CircleCheck as CheckCircle2, X, Receipt, ChevronDown } from 'lucide-react';
+import type { ProductUnit } from '@/lib/types';
+import { isMultiUnitEnabled, getDefaultSaleUnit, convertToBaseUnit } from '@/lib/unit-utils';
 
 interface CartItem {
   id: string;
@@ -16,6 +18,9 @@ interface CartItem {
   inventory_item_id?: string;
   warehouse_id?: string;
   stock_available: number;
+  selected_unit?: ProductUnit;
+  unit_price: number;
+  base_quantity: number;
 }
 
 interface ProductData {
@@ -25,11 +30,15 @@ interface ProductData {
   sale_price: number;
   cost_price: number;
   image_url?: string;
+  unit?: string;
+  base_unit?: string;
+  enable_multi_unit?: boolean;
   inventory_items: {
     id: string;
     warehouse_id: string;
     quantity_on_hand: number;
   }[];
+  units?: ProductUnit[];
 }
 
 const WALK_IN_CUSTOMER_ID = '00000000-0000-0000-0000-000000000001';
@@ -46,6 +55,7 @@ export default function POSPage() {
   const [orderComplete, setOrderComplete] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [lastInvoiceNumber, setLastInvoiceNumber] = useState('');
+  const [unitSelectorProduct, setUnitSelectorProduct] = useState<ProductData | null>(null);
 
   useEffect(() => {
     loadProducts();
@@ -56,7 +66,9 @@ export default function POSPage() {
     setLoading(true);
     const { data } = await supabase
       .from('products')
-      .select('id, name, sku, sale_price, cost_price, image_url, inventory_items(id, warehouse_id, quantity_on_hand)')
+      .select(`id, name, sku, sale_price, cost_price, image_url, unit, base_unit, enable_multi_unit,
+        inventory_items(id, warehouse_id, quantity_on_hand),
+        units(id, product_id, unit_name, unit_short, conversion_factor, is_base_unit, is_sale_unit, price, cost_price, is_active, sort_order)`)
       .eq('is_active', true)
       .limit(100);
     setProducts((data || []) as ProductData[]);
@@ -76,60 +88,88 @@ export default function POSPage() {
     !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase())
   );
 
-  function addToCart(product: ProductData) {
-    // Find the inventory item with the most stock
+  function getStockInBaseUnits(product: ProductData): number {
+    return product.inventory_items?.reduce((s: number, i: any) => s + Number(i.quantity_on_hand), 0) || 0;
+  }
+
+  function addToCart(product: ProductData, selectedUnit?: ProductUnit) {
     const invItems = product.inventory_items || [];
     const bestInv = invItems.length > 0
       ? invItems.reduce((a, b) => (a.quantity_on_hand > b.quantity_on_hand ? a : b))
       : null;
 
-    const stockAvailable = bestInv ? bestInv.quantity_on_hand : 0;
+    const stockAvailableInBase = bestInv ? bestInv.quantity_on_hand : 0;
 
-    if (stockAvailable <= 0) {
+    if (stockAvailableInBase <= 0) {
       toast({ title: 'Out of stock', description: `${product.name} is not available`, variant: 'destructive' });
       return;
     }
 
+    const unit = selectedUnit || getDefaultSaleUnit(product as any);
+    const unitPrice = unit.price || product.sale_price;
+
     setCart(prev => {
-      const existing = prev.find(i => i.id === product.id);
-      if (existing) {
-        if (existing.quantity >= stockAvailable) {
-          toast({ title: 'Stock limit', description: `Only ${stockAvailable} available`, variant: 'destructive' });
+      const existingIndex = prev.findIndex(i => i.id === product.id && i.selected_unit?.id === unit.id);
+
+      if (existingIndex >= 0) {
+        const existing = prev[existingIndex];
+        const newQty = existing.quantity + 1;
+        const newBaseQty = convertToBaseUnit(newQty, unit);
+
+        if (newBaseQty > stockAvailableInBase) {
+          toast({ title: 'Stock limit', description: `Only ${stockAvailableInBase} base units available`, variant: 'destructive' });
           return prev;
         }
-        return prev.map(i => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
+        const updated = [...prev];
+        updated[existingIndex] = { ...existing, quantity: newQty, base_quantity: newBaseQty };
+        return updated;
       }
+
       return [...prev, {
         id: product.id,
         name: product.name,
         sku: product.sku,
-        sale_price: product.sale_price,
+        sale_price: unitPrice,
         quantity: 1,
         image_url: product.image_url,
         inventory_item_id: bestInv?.id,
         warehouse_id: bestInv?.warehouse_id,
-        stock_available: stockAvailable,
+        stock_available: stockAvailableInBase,
+        selected_unit: unit,
+        unit_price: unitPrice,
+        base_quantity: convertToBaseUnit(1, unit),
       }];
     });
+
+    setUnitSelectorProduct(null);
   }
 
-  function updateQty(id: string, delta: number) {
+  function handleProductClick(product: ProductData) {
+    if (isMultiUnitEnabled(product as any)) {
+      setUnitSelectorProduct(product);
+    } else {
+      addToCart(product);
+    }
+  }
+
+  function updateQty(id: string, unitId: string | undefined, delta: number) {
     setCart(prev => prev.map(i => {
-      if (i.id !== id) return i;
+      if (i.id !== id || i.selected_unit?.id !== unitId) return i;
       const newQty = Math.max(0, i.quantity + delta);
-      if (newQty > i.stock_available) {
-        toast({ title: 'Stock limit', description: `Only ${i.stock_available} available`, variant: 'destructive' });
+      const newBaseQty = i.selected_unit ? convertToBaseUnit(newQty, i.selected_unit) : newQty;
+      if (newBaseQty > i.stock_available) {
+        toast({ title: 'Stock limit', description: `Only ${i.stock_available} base units available`, variant: 'destructive' });
         return i;
       }
-      return { ...i, quantity: newQty };
+      return { ...i, quantity: newQty, base_quantity: newBaseQty };
     }).filter(i => i.quantity > 0));
   }
 
-  function removeFromCart(id: string) {
-    setCart(prev => prev.filter(i => i.id !== id));
+  function removeFromCart(id: string, unitId?: string) {
+    setCart(prev => prev.filter(i => !(i.id === id && (unitId ? i.selected_unit?.id === unitId : true))));
   }
 
-  const subtotal = cart.reduce((s, i) => s + i.sale_price * i.quantity, 0);
+  const subtotal = cart.reduce((s, i) => s + i.unit_price * i.quantity, 0);
   const discountAmount = (subtotal * discount) / 100;
   const total = subtotal - discountAmount;
 
@@ -167,16 +207,18 @@ export default function POSPage() {
         invoice_id: invoice.id,
         product_id: item.id,
         quantity: item.quantity,
-        unit_price: item.sale_price,
+        unit_price: item.unit_price,
         discount_percent: discount,
         tax_rate: 0,
-        subtotal: item.quantity * item.sale_price,
+        subtotal: item.quantity * item.unit_price,
+        unit_name: item.selected_unit?.unit_name,
+        unit_conversion_factor: item.selected_unit?.conversion_factor,
+        base_quantity: item.base_quantity,
       }));
 
       const { error: itemsError } = await supabase.from('invoice_items').insert(invoiceItems);
       if (itemsError) throw itemsError;
 
-      // Record payment
       const { error: payError } = await supabase.from('payments').insert({
         payment_number: `PAY-${Date.now().toString().slice(-6)}`,
         payment_type: 'received',
@@ -190,10 +232,8 @@ export default function POSPage() {
       });
       if (payError) console.error('Payment record error:', payError.message);
 
-      // Update stock for each cart item
       for (const item of cart) {
         if (item.inventory_item_id && item.warehouse_id) {
-          // Deduct stock from inventory
           const { data: invData } = await supabase
             .from('inventory_items')
             .select('quantity_on_hand')
@@ -201,30 +241,28 @@ export default function POSPage() {
             .single();
 
           if (invData) {
-            const newQty = Math.max(0, (invData.quantity_on_hand || 0) - item.quantity);
+            const newQty = Math.max(0, (invData.quantity_on_hand || 0) - item.base_quantity);
             await supabase
               .from('inventory_items')
               .update({ quantity_on_hand: newQty, updated_at: new Date().toISOString() })
               .eq('id', item.inventory_item_id);
           }
 
-          // Record stock movement
           const product = products.find(p => p.id === item.id);
           await supabase.from('stock_movements').insert({
             product_id: item.id,
             warehouse_id: item.warehouse_id,
             movement_type: 'sale',
-            quantity: -item.quantity,
-            unit_cost: product?.cost_price || 0,
+            quantity: -item.base_quantity,
+            unit_cost: item.selected_unit?.cost_price || product?.cost_price || 0,
             reference_type: 'invoice',
             reference_id: invoice.id,
             reference_number: invoiceNumber,
-            notes: 'POS sale',
+            notes: `POS sale - ${item.quantity} ${item.selected_unit?.unit_name || 'units'}`,
           });
         }
       }
 
-      // Update customer total purchases
       if (customerId !== WALK_IN_CUSTOMER_ID) {
         const { data: custData } = await supabase
           .from('customers')
@@ -286,24 +324,37 @@ export default function POSPage() {
           )) : filteredProducts.length === 0 ? (
             <div className="col-span-full text-center py-12 text-muted-foreground">No products found</div>
           ) : filteredProducts.map(p => {
-            const stock = p.inventory_items?.reduce((s: number, i: any) => s + Number(i.quantity_on_hand), 0) || 0;
-            const inCart = cart.find(c => c.id === p.id);
-            const cartQty = inCart ? inCart.quantity : 0;
+            const stock = getStockInBaseUnits(p);
+            const multiUnit = isMultiUnitEnabled(p as any);
+            const saleUnit = p.units?.find(u => u.is_sale_unit);
+            const displayPrice = saleUnit?.price || p.sale_price;
+
+            const inCart = cart.filter(c => c.id === p.id);
+            const cartQty = inCart.reduce((sum, c) => sum + c.base_quantity, 0);
             const available = stock - cartQty;
+
             return (
               <button
                 key={p.id}
-                onClick={() => addToCart(p)}
+                onClick={() => handleProductClick(p)}
                 disabled={available <= 0}
-                className="bg-white rounded-xl border border-border p-3 text-left hover:border-blue-400 hover:shadow-md transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-white rounded-xl border border-border p-3 text-left hover:border-blue-400 hover:shadow-md transition-all group disabled:opacity-50 disabled:cursor-not-allowed relative"
               >
+                {multiUnit && (
+                  <span className="absolute top-2 right-2 text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">Multi-unit</span>
+                )}
                 <div className="w-full h-20 bg-muted rounded-lg overflow-hidden mb-2">
                   {p.image_url ? <img src={p.image_url} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" /> : <div className="w-full h-full flex items-center justify-center text-muted-foreground text-2xl">?</div>}
                 </div>
                 <p className="text-xs font-semibold text-foreground leading-tight mb-0.5 line-clamp-2">{p.name}</p>
                 <p className="text-[10px] text-muted-foreground mb-1">{p.sku}</p>
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-bold text-blue-600">{formatCurrency(p.sale_price)}</p>
+                  <div>
+                    <p className="text-sm font-bold text-blue-600">{formatCurrency(displayPrice)}</p>
+                    {multiUnit && saleUnit && (
+                      <p className="text-[9px] text-muted-foreground">per {saleUnit.unit_name}</p>
+                    )}
+                  </div>
                   <span className={`text-[10px] px-1.5 py-0.5 rounded ${available > 0 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'}`}>{available}</span>
                 </div>
               </button>
@@ -328,20 +379,23 @@ export default function POSPage() {
               </div>
             </div>
           ) : cart.map(item => (
-            <div key={item.id} className="flex items-center gap-2 bg-muted/30 rounded-xl p-2">
+            <div key={`${item.id}-${item.selected_unit?.id || 'default'}`} className="flex items-center gap-2 bg-muted/30 rounded-xl p-2">
               <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0 overflow-hidden">
                 {item.image_url ? <img src={item.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-base">?</span>}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-[11px] font-semibold text-foreground truncate">{item.name}</p>
-                <p className="text-[10px] text-muted-foreground">{formatCurrency(item.sale_price)}</p>
+                <p className="text-[10px] text-muted-foreground">
+                  {formatCurrency(item.unit_price)}
+                  {item.selected_unit && <span className="ml-1">/ {item.selected_unit.unit_short || item.selected_unit.unit_name}</span>}
+                </p>
               </div>
               <div className="flex items-center gap-1">
-                <button onClick={() => updateQty(item.id, -1)} className="w-5 h-5 rounded-full bg-white border border-border flex items-center justify-center hover:bg-muted transition"><Minus className="w-2.5 h-2.5" /></button>
+                <button onClick={() => updateQty(item.id, item.selected_unit?.id, -1)} className="w-5 h-5 rounded-full bg-white border border-border flex items-center justify-center hover:bg-muted transition"><Minus className="w-2.5 h-2.5" /></button>
                 <span className="text-xs font-bold w-5 text-center">{item.quantity}</span>
-                <button onClick={() => updateQty(item.id, 1)} className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center hover:bg-blue-600 transition"><Plus className="w-2.5 h-2.5" /></button>
+                <button onClick={() => updateQty(item.id, item.selected_unit?.id, 1)} className="w-5 h-5 rounded-full bg-blue-500 text-white flex items-center justify-center hover:bg-blue-600 transition"><Plus className="w-2.5 h-2.5" /></button>
               </div>
-              <button onClick={() => removeFromCart(item.id)} className="text-muted-foreground hover:text-red-500 transition"><X className="w-3.5 h-3.5" /></button>
+              <button onClick={() => removeFromCart(item.id, item.selected_unit?.id || undefined)} className="text-muted-foreground hover:text-red-500 transition"><X className="w-3.5 h-3.5" /></button>
             </div>
           ))}
         </div>
@@ -388,6 +442,49 @@ export default function POSPage() {
           </div>
         )}
       </div>
+
+      {unitSelectorProduct && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div>
+                <h3 className="font-bold text-sm">{unitSelectorProduct.name}</h3>
+                <p className="text-xs text-muted-foreground">Select unit for this sale</p>
+              </div>
+              <button onClick={() => setUnitSelectorProduct(null)} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4 space-y-2">
+              {unitSelectorProduct.units?.filter(u => u.is_active).map(unit => (
+                <button
+                  key={unit.id}
+                  onClick={() => addToCart(unitSelectorProduct, unit)}
+                  className="w-full flex items-center justify-between p-3 border border-border rounded-xl hover:border-blue-400 hover:bg-blue-50/50 transition"
+                >
+                  <div className="text-left">
+                    <p className="text-sm font-semibold">{unit.unit_name} {unit.unit_short && <span className="text-muted-foreground font-normal">({unit.unit_short})</span>}</p>
+                    <p className="text-xs text-muted-foreground">
+                      1 {unit.unit_name} = {unit.conversion_factor} {unitSelectorProduct.base_unit || 'base units'}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-blue-600">{formatCurrency(unit.price)}</p>
+                    <p className="text-[10px] text-muted-foreground">per {unit.unit_short || unit.unit_name}</p>
+                  </div>
+                </button>
+              ))}
+              {(!unitSelectorProduct.units || unitSelectorProduct.units.filter(u => u.is_active).length === 0) && (
+                <button
+                  onClick={() => addToCart(unitSelectorProduct)}
+                  className="w-full flex items-center justify-between p-3 border border-border rounded-xl hover:border-blue-400 hover:bg-blue-50/50 transition"
+                >
+                  <p className="text-sm font-semibold">{unitSelectorProduct.unit || 'Piece'}</p>
+                  <p className="text-sm font-bold text-blue-600">{formatCurrency(unitSelectorProduct.sale_price)}</p>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

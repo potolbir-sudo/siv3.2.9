@@ -5,12 +5,9 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { formatCurrency, formatDate } from '@/lib/format';
 import { toast } from '@/hooks/use-toast';
-import {
-  ShoppingCart, Plus, Search, Eye, X, Trash2,
-  TrendingUp, Clock, CheckCircle2, AlertCircle, Printer,
-  DollarSign, Send, CreditCard
-} from 'lucide-react';
-import type { Invoice, InvoiceStatus, Customer, Product, Payment, PaymentMethod } from '@/lib/types';
+import { ShoppingCart, Plus, Search, Eye, X, Trash2, TrendingUp, Clock, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Printer, DollarSign, Send, CreditCard, ChevronDown } from 'lucide-react';
+import type { Invoice, InvoiceStatus, Customer, Product, Payment, PaymentMethod, ProductUnit } from '@/lib/types';
+import { isMultiUnitEnabled, getDefaultSaleUnit, convertToBaseUnit } from '@/lib/unit-utils';
 
 const statusConfig: Record<InvoiceStatus, { label: string; color: string; bg: string }> = {
   draft: { label: 'Draft', color: 'text-gray-600', bg: 'bg-gray-100' },
@@ -34,6 +31,8 @@ interface InvoiceItem {
   discount_percent: number;
   tax_rate: number;
   subtotal: number;
+  selected_unit?: ProductUnit;
+  base_quantity: number;
 }
 
 export default function SalesPage() {
@@ -57,7 +56,7 @@ export default function SalesPage() {
     const [invRes, custRes, prodRes] = await Promise.all([
       supabase.from('invoices').select('*, customer:customers(name, code, phone, address)').order('created_at', { ascending: false }),
       supabase.from('customers').select('*').eq('is_active', true).order('name'),
-      supabase.from('products').select('*').eq('is_active', true).order('name'),
+      supabase.from('products').select(`*, units(id, product_id, unit_name, unit_short, conversion_factor, is_base_unit, is_sale_unit, price, cost_price, is_active, sort_order)`).eq('is_active', true).order('name'),
     ]);
     setInvoices(invRes.data || []);
     setCustomers(custRes.data || []);
@@ -80,6 +79,130 @@ export default function SalesPage() {
       .eq('invoice_id', invoice.id);
     setInvoiceItems(data || []);
     setViewingInvoice(invoice);
+  }
+
+  function ViewInvoiceModal({ invoice, items, onClose, onRecordPayment, onUpdateStatus }: {
+    invoice: InvoiceWithCustomer;
+    items: any[];
+    onClose: () => void;
+    onRecordPayment: () => void;
+    onUpdateStatus: (status: InvoiceStatus) => void;
+  }) {
+    const cfg = statusConfig[invoice.status as InvoiceStatus] || statusConfig.draft;
+    const balance = invoice.balance_due || (invoice.total_amount - invoice.amount_paid);
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-white">
+            <h2 className="text-base font-bold">Invoice {invoice.invoice_number}</h2>
+            <div className="flex items-center gap-2">
+              <button className="flex items-center gap-1 px-3 py-1.5 border border-border rounded-lg text-sm hover:bg-muted transition">
+                <Printer className="w-4 h-4" />Print
+              </button>
+              <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
+            </div>
+          </div>
+
+          <div className="p-6 space-y-6">
+            <div className="flex justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground">Customer</p>
+                <p className="font-semibold text-foreground">{invoice.customer?.name || '-'}</p>
+                <p className="text-sm text-muted-foreground">{invoice.customer?.phone || '-'}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-muted-foreground">Status</p>
+                <span className={`badge-status ${cfg.bg} ${cfg.color}`}>{cfg.label}</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4 py-3 border-y border-border">
+              <div>
+                <p className="text-xs text-muted-foreground">Invoice Date</p>
+                <p className="text-sm font-medium">{formatDate(invoice.invoice_date)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Due Date</p>
+                <p className="text-sm font-medium">{invoice.due_date ? formatDate(invoice.due_date) : '-'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Amount Paid</p>
+                <p className="text-sm font-medium text-green-600">{formatCurrency(invoice.amount_paid)}</p>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-medium mb-2">Items</p>
+              <div className="border border-border rounded-lg overflow-hidden">
+                <table className="w-full">
+                  <thead className="bg-muted/40">
+                    <tr>
+                      <th className="text-left text-xs font-semibold text-muted-foreground px-3 py-2">Product</th>
+                      <th className="text-right text-xs font-semibold text-muted-foreground px-3 py-2">Qty</th>
+                      <th className="text-right text-xs font-semibold text-muted-foreground px-3 py-2">Price</th>
+                      <th className="text-right text-xs font-semibold text-muted-foreground px-3 py-2">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {items.length === 0 ? (
+                      <tr><td colSpan={4} className="px-3 py-4 text-center text-xs text-muted-foreground">No items</td></tr>
+                    ) : items.map((item, idx) => (
+                      <tr key={idx}>
+                        <td className="px-3 py-2 text-sm">
+                          {item.product?.name || '-'}
+                          {item.unit_name && <span className="text-xs text-muted-foreground ml-1">({item.unit_name})</span>}
+                        </td>
+                        <td className="px-3 py-2 text-sm text-right">
+                          {item.quantity}{item.unit_name ? ` ${item.unit_name}` : ''}
+                          {item.base_quantity && item.unit_conversion_factor > 1 && (
+                            <span className="text-[10px] text-muted-foreground block">{item.base_quantity} base</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-sm text-right">{formatCurrency(item.unit_price)}</td>
+                        <td className="px-3 py-2 text-sm text-right font-semibold">{formatCurrency(item.subtotal)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="flex justify-end bg-muted/30 rounded-lg p-4">
+              <div className="w-48 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span>{formatCurrency(invoice.subtotal)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Paid</span>
+                  <span className="text-green-600">{formatCurrency(invoice.amount_paid)}</span>
+                </div>
+                <div className="flex justify-between font-bold text-base border-t border-border pt-2">
+                  <span>Balance Due</span>
+                  <span className="text-red-600">{formatCurrency(balance)}</span>
+                </div>
+              </div>
+            </div>
+
+            {invoice.status !== 'paid' && invoice.status !== 'cancelled' && invoice.status !== 'refunded' && (
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+                {invoice.status === 'draft' && (
+                  <button onClick={() => onUpdateStatus('sent')} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition">
+                    <Send className="w-4 h-4" />Mark as Sent
+                  </button>
+                )}
+                {balance > 0 && (invoice.status === 'sent' || invoice.status === 'partially_paid') && (
+                  <button onClick={onRecordPayment} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold transition">
+                    <CreditCard className="w-4 h-4" />Record Payment
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   function openPaymentModal(invoice: InvoiceWithCustomer) {
@@ -253,19 +376,51 @@ function CreateInvoiceModal({ customers, products, onClose, onSaved }: {
     payment_type: 'credit' as 'credit' | 'partial' | 'full',
     amount_paid: 0,
   });
-  const [items, setItems] = useState<{ product_id: string; quantity: number; unit_price: number }[]>([]);
+  const [items, setItems] = useState<{ product_id: string; quantity: number; unit_price: number; selected_unit?: ProductUnit; base_quantity: number }[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [showUnitSelector, setShowUnitSelector] = useState<number | null>(null);
 
   function addItem() {
-    setItems([...items, { product_id: '', quantity: 1, unit_price: 0 }]);
+    setItems([...items, { product_id: '', quantity: 1, unit_price: 0, base_quantity: 1 }]);
   }
 
   function updateItem(index: number, field: string, value: any) {
     const updated = [...items];
+    const product = products.find(p => p.id === (field === 'product_id' ? value : updated[index].product_id));
+
     if (field === 'product_id') {
-      const product = products.find(p => p.id === value);
-      updated[index] = { product_id: value, quantity: 1, unit_price: product?.sale_price || 0 };
+      if (product && isMultiUnitEnabled(product)) {
+        const defaultUnit = getDefaultSaleUnit(product);
+        updated[index] = {
+          product_id: value,
+          quantity: 1,
+          unit_price: defaultUnit.price,
+          selected_unit: defaultUnit,
+          base_quantity: convertToBaseUnit(1, defaultUnit),
+        };
+      } else if (product) {
+        updated[index] = {
+          product_id: value,
+          quantity: 1,
+          unit_price: product.sale_price,
+          selected_unit: undefined,
+          base_quantity: 1,
+        };
+      }
+    } else if (field === 'selected_unit') {
+      const unit = value as ProductUnit;
+      updated[index] = {
+        ...updated[index],
+        selected_unit: unit,
+        unit_price: unit.price,
+        base_quantity: convertToBaseUnit(updated[index].quantity, unit),
+      };
+    } else if (field === 'quantity') {
+      const qty = parseInt(value) || 1;
+      const unit = updated[index].selected_unit;
+      const baseQty = unit ? convertToBaseUnit(qty, unit) : qty;
+      updated[index] = { ...updated[index], quantity: qty, base_quantity: baseQty };
     } else {
       (updated[index] as any)[field] = value;
     }
@@ -277,8 +432,7 @@ function CreateInvoiceModal({ customers, products, onClose, onSaved }: {
   }
 
   const subtotal = items.reduce((sum, item) => {
-    const product = products.find(p => p.id === item.product_id);
-    return sum + (item.quantity * (item.unit_price || product?.sale_price || 0));
+    return sum + (item.quantity * item.unit_price);
   }, 0);
 
   const amountPaid = form.payment_type === 'full' ? subtotal : (form.payment_type === 'partial' ? form.amount_paid : 0);
@@ -323,6 +477,9 @@ function CreateInvoiceModal({ customers, products, onClose, onSaved }: {
       discount_percent: 0,
       tax_rate: 0,
       subtotal: item.quantity * item.unit_price,
+      unit_name: item.selected_unit?.unit_name,
+      unit_conversion_factor: item.selected_unit?.conversion_factor,
+      base_quantity: item.base_quantity,
     }));
 
     const { error: itemsError } = await supabase.from('invoice_items').insert(invoiceItems);
@@ -340,7 +497,7 @@ function CreateInvoiceModal({ customers, products, onClose, onSaved }: {
 
       if (invData && invData.length > 0) {
         const inv = invData[0];
-        const newQty = Math.max(0, (inv.quantity_on_hand || 0) - item.quantity);
+        const newQty = Math.max(0, (inv.quantity_on_hand || 0) - item.base_quantity);
         await supabase
           .from('inventory_items')
           .update({ quantity_on_hand: newQty, updated_at: new Date().toISOString() })
@@ -351,12 +508,12 @@ function CreateInvoiceModal({ customers, products, onClose, onSaved }: {
           product_id: item.product_id,
           warehouse_id: inv.warehouse_id,
           movement_type: 'sale',
-          quantity: -item.quantity,
-          unit_cost: product?.cost_price || 0,
+          quantity: -item.base_quantity,
+          unit_cost: item.selected_unit?.cost_price || product?.cost_price || 0,
           reference_type: 'invoice',
           reference_id: invoice.id,
           reference_number: invoiceNumber,
-          notes: 'Invoice sale',
+          notes: `Invoice sale - ${item.quantity} ${item.selected_unit?.unit_name || 'units'}`,
         });
       }
     }
@@ -449,6 +606,8 @@ function CreateInvoiceModal({ customers, products, onClose, onSaved }: {
                     <tr><td colSpan={5} className="px-3 py-4 text-center text-xs text-muted-foreground">No items added. Click "Add Item" to add products.</td></tr>
                   ) : items.map((item, index) => {
                     const product = products.find(p => p.id === item.product_id);
+                    const multiUnit = product && isMultiUnitEnabled(product);
+                    const saleUnit = product?.units?.find(u => u.is_sale_unit);
                     return (
                       <tr key={index}>
                         <td className="px-3 py-2">
@@ -456,9 +615,29 @@ function CreateInvoiceModal({ customers, products, onClose, onSaved }: {
                             <option value="">Select product</option>
                             {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
                           </select>
+                          {multiUnit && item.selected_unit && (
+                            <div className="mt-1">
+                              <select
+                                value={item.selected_unit.id}
+                                onChange={e => {
+                                  const unit = product?.units?.find(u => u.id === e.target.value);
+                                  if (unit) updateItem(index, 'selected_unit', unit);
+                                }}
+                                className="w-full border border-blue-200 bg-blue-50 text-blue-700 rounded px-2 py-1 text-xs focus:outline-none"
+                              >
+                                {product?.units?.filter(u => u.is_active).map(u => (
+                                  <option key={u.id} value={u.id}>{u.unit_name} - {formatCurrency(u.price)}</option>
+                                ))}
+                              </select>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">1 {item.selected_unit.unit_name} = {item.selected_unit.conversion_factor} {product?.base_unit || 'base'}</p>
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-2">
-                          <input type="number" min="1" value={item.quantity} onChange={e => updateItem(index, 'quantity', parseInt(e.target.value) || 1)} className="w-full border border-border rounded px-2 py-1 text-sm text-right focus:outline-none" />
+                          <input type="number" min="1" value={item.quantity} onChange={e => updateItem(index, 'quantity', e.target.value)} className="w-full border border-border rounded px-2 py-1 text-sm text-right focus:outline-none" />
+                          {multiUnit && item.selected_unit && (
+                            <p className="text-[10px] text-muted-foreground text-center mt-0.5">= {item.base_quantity} {product?.base_unit || 'base'}</p>
+                          )}
                         </td>
                         <td className="px-3 py-2">
                           <input type="number" min="0" step="0.01" value={item.unit_price} onChange={e => updateItem(index, 'unit_price', parseFloat(e.target.value) || 0)} className="w-full border border-border rounded px-2 py-1 text-sm text-right focus:outline-none" />
@@ -545,122 +724,6 @@ function CreateInvoiceModal({ customers, products, onClose, onSaved }: {
             </button>
           </div>
         </form>
-      </div>
-    </div>
-  );
-}
-
-function ViewInvoiceModal({ invoice, items, onClose, onRecordPayment, onUpdateStatus }: {
-  invoice: InvoiceWithCustomer;
-  items: any[];
-  onClose: () => void;
-  onRecordPayment: () => void;
-  onUpdateStatus: (status: InvoiceStatus) => void;
-}) {
-  const cfg = statusConfig[invoice.status as InvoiceStatus] || statusConfig.draft;
-  const balance = invoice.balance_due || (invoice.total_amount - invoice.amount_paid);
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-white">
-          <h2 className="text-base font-bold">Invoice {invoice.invoice_number}</h2>
-          <div className="flex items-center gap-2">
-            <button className="flex items-center gap-1 px-3 py-1.5 border border-border rounded-lg text-sm hover:bg-muted transition">
-              <Printer className="w-4 h-4" />Print
-            </button>
-            <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
-          </div>
-        </div>
-
-        <div className="p-6 space-y-6">
-          <div className="flex justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground">Customer</p>
-              <p className="font-semibold text-foreground">{invoice.customer?.name || '-'}</p>
-              <p className="text-sm text-muted-foreground">{invoice.customer?.phone || '-'}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-muted-foreground">Status</p>
-              <span className={`badge-status ${cfg.bg} ${cfg.color}`}>{cfg.label}</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-4 py-3 border-y border-border">
-            <div>
-              <p className="text-xs text-muted-foreground">Invoice Date</p>
-              <p className="text-sm font-medium">{formatDate(invoice.invoice_date)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Due Date</p>
-              <p className="text-sm font-medium">{invoice.due_date ? formatDate(invoice.due_date) : '-'}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Amount Paid</p>
-              <p className="text-sm font-medium text-green-600">{formatCurrency(invoice.amount_paid)}</p>
-            </div>
-          </div>
-
-          <div>
-            <p className="text-xs font-medium mb-2">Items</p>
-            <div className="border border-border rounded-lg overflow-hidden">
-              <table className="w-full">
-                <thead className="bg-muted/40">
-                  <tr>
-                    <th className="text-left text-xs font-semibold text-muted-foreground px-3 py-2">Product</th>
-                    <th className="text-right text-xs font-semibold text-muted-foreground px-3 py-2">Qty</th>
-                    <th className="text-right text-xs font-semibold text-muted-foreground px-3 py-2">Price</th>
-                    <th className="text-right text-xs font-semibold text-muted-foreground px-3 py-2">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {items.length === 0 ? (
-                    <tr><td colSpan={4} className="px-3 py-4 text-center text-xs text-muted-foreground">No items</td></tr>
-                  ) : items.map((item, idx) => (
-                    <tr key={idx}>
-                      <td className="px-3 py-2 text-sm">{item.product?.name || '-'}</td>
-                      <td className="px-3 py-2 text-sm text-right">{item.quantity}</td>
-                      <td className="px-3 py-2 text-sm text-right">{formatCurrency(item.unit_price)}</td>
-                      <td className="px-3 py-2 text-sm text-right font-semibold">{formatCurrency(item.subtotal)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="flex justify-end bg-muted/30 rounded-lg p-4">
-            <div className="w-48 space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Subtotal</span>
-                <span>{formatCurrency(invoice.subtotal)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Paid</span>
-                <span className="text-green-600">{formatCurrency(invoice.amount_paid)}</span>
-              </div>
-              <div className="flex justify-between font-bold text-base border-t border-border pt-2">
-                <span>Balance Due</span>
-                <span className="text-red-600">{formatCurrency(balance)}</span>
-              </div>
-            </div>
-          </div>
-
-          {invoice.status !== 'paid' && invoice.status !== 'cancelled' && invoice.status !== 'refunded' && (
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
-              {invoice.status === 'draft' && (
-                <button onClick={() => onUpdateStatus('sent')} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition">
-                  <Send className="w-4 h-4" />Mark as Sent
-                </button>
-              )}
-              {balance > 0 && (invoice.status === 'sent' || invoice.status === 'partially_paid') && (
-                <button onClick={onRecordPayment} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold transition">
-                  <CreditCard className="w-4 h-4" />Record Payment
-                </button>
-              )}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );

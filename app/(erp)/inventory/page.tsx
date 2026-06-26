@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/format';
 import { toast } from '@/hooks/use-toast';
-import { Package, Plus, Search, CreditCard as Edit, Trash2, TriangleAlert as AlertTriangle, ChartBar as BarChart3, Boxes, TrendingDown, RefreshCw, X, Warehouse } from 'lucide-react';
-import type { Product, Category, Brand, Warehouse as WarehouseType } from '@/lib/types';
+import { Package, Plus, Search, CreditCard as Edit, Trash2, TriangleAlert as AlertTriangle, ChartBar as BarChart3, Boxes, TrendingDown, RefreshCw, X, Warehouse, Palette, Ruler, ChevronDown, ChevronUp, Info } from 'lucide-react';
+import type { Product, Category, Brand, Warehouse as WarehouseType, ProductColor, ProductSize, ProductUnit } from '@/lib/types';
 
 function StockByWarehouse({ productId, warehouses, inventoryByWarehouse }: { productId: string; warehouses: WarehouseType[]; inventoryByWarehouse: Record<string, Record<string, number>> }) {
   const stockByWh = inventoryByWarehouse[productId] || {};
@@ -35,7 +35,7 @@ export default function InventoryPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseType[]>([]);
-  const [inventoryByWarehouse, setInventoryByWarehouse] = useState<Record<string, Record<string, number>>>({}); // productId -> warehouseId -> qty
+  const [inventoryByWarehouse, setInventoryByWarehouse] = useState<Record<string, Record<string, number>>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
@@ -59,7 +59,6 @@ export default function InventoryPage() {
       supabase.from('warehouses').select('*').eq('is_active', true).order('is_default', { ascending: false }),
     ]);
 
-    // Build stock map by product and warehouse
     const stockMap: Record<string, number> = {};
     const byWarehouse: Record<string, Record<string, number>> = {};
     (invRes.data || []).forEach((i: any) => {
@@ -231,7 +230,7 @@ export default function InventoryPage() {
                         </div>
                         <div>
                           <p className="text-sm font-semibold text-foreground">{p.name}</p>
-                          <p className="text-xs text-muted-foreground">{p.unit}</p>
+                          <p className="text-xs text-muted-foreground">{p.enable_multi_unit ? <span className="text-blue-600">Multi-unit</span> : p.unit}</p>
                         </div>
                       </div>
                     </td>
@@ -303,22 +302,150 @@ function ProductModal({ categories, brands, warehouses, product, onClose, onSave
     min_stock_level: product?.min_stock_level?.toString() || '0',
     description: product?.description || '',
     is_active: product?.is_active ?? true,
+    enable_multi_unit: product?.enable_multi_unit ?? false,
+    enable_colors: product?.enable_colors ?? false,
+    enable_sizes: product?.enable_sizes ?? false,
   });
   const [stockByWarehouse, setStockByWarehouse] = useState<Record<string, string>>(
     warehouses.reduce((acc, w) => ({ ...acc, [w.id]: '0' }), {})
   );
+  const [colors, setColors] = useState<ProductColor[]>([]);
+  const [sizes, setSizes] = useState<ProductSize[]>([]);
+  const [units, setUnits] = useState<ProductUnit[]>([]);
+  const [showUnits, setShowUnits] = useState(true);
+  const [showColors, setShowColors] = useState(true);
+  const [showSizes, setShowSizes] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    if (product?.id) {
+      loadProductVariants(product.id);
+    }
+  }, [product?.id]);
+
+  async function loadProductVariants(productId: string) {
+    const [colorRes, sizeRes, unitRes] = await Promise.all([
+      supabase.from('product_colors').select('*').eq('product_id', productId).order('sort_order'),
+      supabase.from('product_sizes').select('*').eq('product_id', productId).order('sort_order'),
+      supabase.from('product_units').select('*').eq('product_id', productId).order('sort_order'),
+    ]);
+    setColors((colorRes.data || []) as ProductColor[]);
+    setSizes((sizeRes.data || []) as ProductSize[]);
+    setUnits((unitRes.data || []) as ProductUnit[]);
+  }
+
+  function addColor() {
+    setColors([...colors, {
+      id: `temp-${Date.now()}`,
+      product_id: product?.id || '',
+      name: '',
+      hex_code: '#000000',
+      is_default: colors.length === 0,
+      sort_order: colors.length,
+      created_at: new Date().toISOString(),
+    }]);
+  }
+
+  function addSize() {
+    setSizes([...sizes, {
+      id: `temp-${Date.now()}`,
+      product_id: product?.id || '',
+      name: '',
+      dimensions: '',
+      is_default: sizes.length === 0,
+      sort_order: sizes.length,
+      created_at: new Date().toISOString(),
+    }]);
+  }
+
+  function addUnit() {
+    const hasBaseUnit = units.some(u => u.is_base_unit);
+    setUnits([...units, {
+      id: `temp-${Date.now()}`,
+      product_id: product?.id || '',
+      unit_name: '',
+      unit_short: '',
+      conversion_factor: 1,
+      is_base_unit: !hasBaseUnit,
+      is_sale_unit: units.length === 0,
+      price: 0,
+      cost_price: 0,
+      sort_order: units.length,
+      is_active: true,
+      created_at: new Date().toISOString(),
+    }]);
+  }
+
+  function updateColor(index: number, field: keyof ProductColor, value: any) {
+    const updated = [...colors];
+    (updated[index] as any)[field] = value;
+    if (field === 'is_default' && value === true) {
+      updated.forEach((c, i) => { if (i !== index) c.is_default = false; });
+    }
+    setColors(updated);
+  }
+
+  function updateSize(index: number, field: keyof ProductSize, value: any) {
+    const updated = [...sizes];
+    (updated[index] as any)[field] = value;
+    if (field === 'is_default' && value === true) {
+      updated.forEach((s, i) => { if (i !== index) s.is_default = false; });
+    }
+    setSizes(updated);
+  }
+
+  function updateUnit(index: number, field: keyof ProductUnit, value: any) {
+    const updated = [...units];
+    (updated[index] as any)[field] = value;
+    if (field === 'is_base_unit' && value === true) {
+      updated.forEach((u, i) => { if (i !== index) u.is_base_unit = false; });
+    }
+    if (field === 'is_sale_unit' && value === true) {
+      updated.forEach((u, i) => { if (i !== index) u.is_sale_unit = false; });
+    }
+    setUnits(updated);
+  }
+
+  function removeColor(index: number) {
+    setColors(colors.filter((_, i) => i !== index));
+  }
+
+  function removeSize(index: number) {
+    setSizes(sizes.filter((_, i) => i !== index));
+  }
+
+  function removeUnit(index: number) {
+    setUnits(units.filter((_, i) => i !== index));
+  }
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
+
+    if (form.enable_multi_unit) {
+      if (units.length === 0) {
+        setError('Please add at least one unit when multi-unit is enabled');
+        return;
+      }
+      if (!units.some(u => u.is_base_unit)) {
+        setError('Please mark one unit as the base unit');
+        return;
+      }
+    }
+
     setSaving(true);
     setError('');
 
-    const data = {
+    const baseUnit = form.enable_multi_unit ? units.find(u => u.is_base_unit)?.unit_name || form.unit : form.unit;
+
+    const data: any = {
       name: form.name,
       sku: form.sku,
       unit: form.unit,
+      base_unit: baseUnit,
+      enable_multi_unit: form.enable_multi_unit,
+      enable_colors: form.enable_colors,
+      enable_sizes: form.enable_sizes,
       cost_price: Number(form.cost_price),
       sale_price: Number(form.sale_price),
       category_id: form.category_id || null,
@@ -340,33 +467,79 @@ function ProductModal({ categories, brands, warehouses, product, onClose, onSave
         productId = newProduct.id;
       }
 
-      // Handle warehouse stock allocation for new products
-      if (!isEdit && productId) {
-        const defaultWarehouse = warehouses.find(w => w.is_default);
-
-        for (const [warehouseId, qty] of Object.entries(stockByWarehouse)) {
-          const quantity = Number(qty);
-          if (quantity > 0) {
-            // Create inventory item
-            await supabase.from('inventory_items').insert({
-              tenant_id: '00000000-0000-0000-0000-000000000001',
+      if (productId) {
+        if (form.enable_colors && colors.length > 0) {
+          await supabase.from('product_colors').delete().eq('product_id', productId);
+          const validColors = colors.filter(c => c.name.trim());
+          for (const color of validColors) {
+            await supabase.from('product_colors').insert({
               product_id: productId,
-              warehouse_id: warehouseId,
-              quantity_on_hand: quantity,
+              name: color.name,
+              hex_code: color.hex_code,
+              image_url: color.image_url || null,
+              is_default: color.is_default,
+              sort_order: color.sort_order,
             });
+          }
+        }
 
-            // Create stock movement
-            await supabase.from('stock_movements').insert({
-              tenant_id: '00000000-0000-0000-0000-000000000001',
+        if (form.enable_sizes && sizes.length > 0) {
+          await supabase.from('product_sizes').delete().eq('product_id', productId);
+          const validSizes = sizes.filter(s => s.name.trim());
+          for (const size of validSizes) {
+            await supabase.from('product_sizes').insert({
               product_id: productId,
-              warehouse_id: warehouseId,
-              movement_type: 'opening',
-              quantity: quantity,
-              unit_cost: Number(form.cost_price),
-              reference_type: 'product_creation',
-              reference_id: productId,
-              notes: 'Initial stock on product creation',
+              name: size.name,
+              dimensions: size.dimensions || null,
+              is_default: size.is_default,
+              sort_order: size.sort_order,
             });
+          }
+        }
+
+        if (form.enable_multi_unit && units.length > 0) {
+          await supabase.from('product_units').delete().eq('product_id', productId);
+          const validUnits = units.filter(u => u.unit_name.trim());
+          for (const unit of validUnits) {
+            await supabase.from('product_units').insert({
+              product_id: productId,
+              unit_name: unit.unit_name,
+              unit_short: unit.unit_short || null,
+              conversion_factor: unit.conversion_factor,
+              is_base_unit: unit.is_base_unit,
+              is_sale_unit: unit.is_sale_unit,
+              price: unit.price,
+              cost_price: unit.cost_price,
+              barcode: unit.barcode || null,
+              sort_order: unit.sort_order,
+              is_active: unit.is_active,
+            });
+          }
+        }
+
+        if (!isEdit) {
+          for (const [warehouseId, qty] of Object.entries(stockByWarehouse)) {
+            const quantity = Number(qty);
+            if (quantity > 0) {
+              await supabase.from('inventory_items').insert({
+                tenant_id: '00000000-0000-0000-0000-000000000001',
+                product_id: productId,
+                warehouse_id: warehouseId,
+                quantity_on_hand: quantity,
+              });
+
+              await supabase.from('stock_movements').insert({
+                tenant_id: '00000000-0000-0000-0000-000000000001',
+                product_id: productId,
+                warehouse_id: warehouseId,
+                movement_type: 'opening',
+                quantity: quantity,
+                unit_cost: Number(form.cost_price),
+                reference_type: 'product_creation',
+                reference_id: productId,
+                notes: 'Initial stock on product creation',
+              });
+            }
           }
         }
       }
@@ -383,13 +556,14 @@ function ProductModal({ categories, brands, warehouses, product, onClose, onSave
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-white">
+      <div className="bg-white rounded-2xl w-full max-w-3xl shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-white z-10">
           <h2 className="text-base font-bold">{isEdit ? 'Edit Product' : 'Add New Product'}</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
         </div>
         <form onSubmit={handleSave} className="p-6 space-y-4">
           {error && <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium mb-1">Product Name *</label>
@@ -400,6 +574,7 @@ function ProductModal({ categories, brands, warehouses, product, onClose, onSave
               <input required value={form.sku} onChange={e => setForm({ ...form, sku: e.target.value })} className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
             </div>
           </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium mb-1">Category</label>
@@ -416,22 +591,135 @@ function ProductModal({ categories, brands, warehouses, product, onClose, onSave
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-medium mb-1">Unit</label>
-              <select value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none">
-                {['pcs', 'sqft', 'bag', 'tin', 'set', 'box', 'kg', 'ltr', 'meter'].map(u => <option key={u}>{u}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium mb-1">Cost Price *</label>
-              <input type="number" required min="0" step="0.01" value={form.cost_price} onChange={e => setForm({ ...form, cost_price: e.target.value })} className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium mb-1">Sale Price *</label>
-              <input type="number" required min="0" step="0.01" value={form.sale_price} onChange={e => setForm({ ...form, sale_price: e.target.value })} className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
-            </div>
+
+          <div className="flex flex-wrap gap-4 p-3 bg-muted/30 rounded-lg">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={form.enable_multi_unit} onChange={e => setForm({ ...form, enable_multi_unit: e.target.checked })} className="rounded" />
+              <span className="text-sm flex items-center gap-1"><Package className="w-3.5 h-3.5" /> Multi-Unit Pricing</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={form.enable_colors} onChange={e => setForm({ ...form, enable_colors: e.target.checked })} className="rounded" />
+              <span className="text-sm flex items-center gap-1"><Palette className="w-3.5 h-3.5" /> Color Variants</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={form.enable_sizes} onChange={e => setForm({ ...form, enable_sizes: e.target.checked })} className="rounded" />
+              <span className="text-sm flex items-center gap-1"><Ruler className="w-3.5 h-3.5" /> Size Variants</span>
+            </label>
           </div>
+
+          {!form.enable_multi_unit && (
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium mb-1">Unit</label>
+                <select value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none">
+                  {['pcs', 'sqft', 'bag', 'tin', 'set', 'box', 'kg', 'ltr', 'meter', 'coil', 'roll', 'carton'].map(u => <option key={u}>{u}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1">Cost Price *</label>
+                <input type="number" required min="0" step="0.01" value={form.cost_price} onChange={e => setForm({ ...form, cost_price: e.target.value })} className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1">Sale Price *</label>
+                <input type="number" required min="0" step="0.01" value={form.sale_price} onChange={e => setForm({ ...form, sale_price: e.target.value })} className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+              </div>
+            </div>
+          )}
+
+          {form.enable_multi_unit && (
+            <div className="border border-border rounded-lg overflow-hidden">
+              <button type="button" onClick={() => setShowUnits(!showUnits)} className="w-full flex items-center justify-between px-4 py-3 bg-blue-50 text-blue-700 hover:bg-blue-100 transition">
+                <span className="font-medium text-sm flex items-center gap-2"><Package className="w-4 h-4" /> Units & Pricing ({units.length})</span>
+                {showUnits ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+              {showUnits && (
+                <div className="p-4 space-y-3 bg-white">
+                  <div className="text-xs text-muted-foreground mb-2 flex items-start gap-2">
+                    <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>Define units. The <strong>base unit</strong> is the smallest (stock tracked in this). Conversion factor = how many base units equal 1 of this unit. Example: 1 Box = 100 pieces means Box has conversion_factor = 100.</span>
+                  </div>
+                  {units.map((unit, index) => (
+                    <div key={unit.id} className="grid grid-cols-12 gap-2 p-2 bg-muted/30 rounded-lg items-center">
+                      <div className="col-span-2">
+                        <input placeholder="Unit name" value={unit.unit_name} onChange={e => updateUnit(index, 'unit_name', e.target.value)} className="w-full border border-border rounded px-2 py-1 text-sm" />
+                      </div>
+                      <div className="col-span-1">
+                        <input placeholder="Short" value={unit.unit_short || ''} onChange={e => updateUnit(index, 'unit_short', e.target.value)} className="w-full border border-border rounded px-2 py-1 text-sm" />
+                      </div>
+                      <div className="col-span-1">
+                        <input type="number" placeholder="Conv." value={unit.conversion_factor} onChange={e => updateUnit(index, 'conversion_factor', parseFloat(e.target.value) || 1)} className="w-full border border-border rounded px-2 py-1 text-sm" />
+                      </div>
+                      <div className="col-span-2">
+                        <input type="number" placeholder="Sale Price" value={unit.price} onChange={e => updateUnit(index, 'price', parseFloat(e.target.value) || 0)} className="w-full border border-border rounded px-2 py-1 text-sm" />
+                      </div>
+                      <div className="col-span-2">
+                        <input type="number" placeholder="Cost Price" value={unit.cost_price} onChange={e => updateUnit(index, 'cost_price', parseFloat(e.target.value) || 0)} className="w-full border border-border rounded px-2 py-1 text-sm" />
+                      </div>
+                      <div className="col-span-2 flex gap-1 flex-wrap">
+                        <button type="button" onClick={() => updateUnit(index, 'is_base_unit', !unit.is_base_unit)} className={`px-2 py-1 rounded text-[10px] font-medium ${unit.is_base_unit ? 'bg-green-500 text-white' : 'bg-muted text-muted-foreground'}`}>Base</button>
+                        <button type="button" onClick={() => updateUnit(index, 'is_sale_unit', !unit.is_sale_unit)} className={`px-2 py-1 rounded text-[10px] font-medium ${unit.is_sale_unit ? 'bg-blue-500 text-white' : 'bg-muted text-muted-foreground'}`}>Sale</button>
+                      </div>
+                      <div className="col-span-2 flex justify-end">
+                        <button type="button" onClick={() => removeUnit(index)} className="text-red-500 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                    </div>
+                  ))}
+                  <button type="button" onClick={addUnit} className="w-full py-2 border-2 border-dashed border-blue-300 rounded-lg text-blue-600 hover:bg-blue-50 transition text-sm font-medium">
+                    <Plus className="w-4 h-4 inline mr-1" /> Add Unit
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {form.enable_colors && (
+            <div className="border border-border rounded-lg overflow-hidden">
+              <button type="button" onClick={() => setShowColors(!showColors)} className="w-full flex items-center justify-between px-4 py-3 bg-pink-50 text-pink-700 hover:bg-pink-100 transition">
+                <span className="font-medium text-sm flex items-center gap-2"><Palette className="w-4 h-4" /> Colors ({colors.length})</span>
+                {showColors ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+              {showColors && (
+                <div className="p-4 space-y-2 bg-white">
+                  {colors.map((color, index) => (
+                    <div key={color.id} className="flex items-center gap-2 p-2 bg-muted/30 rounded-lg">
+                      <input type="color" value={color.hex_code || '#000000'} onChange={e => updateColor(index, 'hex_code', e.target.value)} className="w-8 h-8 rounded cursor-pointer" />
+                      <input placeholder="Color name" value={color.name} onChange={e => updateColor(index, 'name', e.target.value)} className="flex-1 border border-border rounded px-2 py-1 text-sm" />
+                      <button type="button" onClick={() => updateColor(index, 'is_default', !color.is_default)} className={`px-2 py-1 rounded text-[10px] font-medium ${color.is_default ? 'bg-pink-500 text-white' : 'bg-muted text-muted-foreground'}`}>Default</button>
+                      <button type="button" onClick={() => removeColor(index)} className="text-red-500 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={addColor} className="w-full py-2 border-2 border-dashed border-pink-300 rounded-lg text-pink-600 hover:bg-pink-50 transition text-sm font-medium">
+                    <Plus className="w-4 h-4 inline mr-1" /> Add Color
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {form.enable_sizes && (
+            <div className="border border-border rounded-lg overflow-hidden">
+              <button type="button" onClick={() => setShowSizes(!showSizes)} className="w-full flex items-center justify-between px-4 py-3 bg-purple-50 text-purple-700 hover:bg-purple-100 transition">
+                <span className="font-medium text-sm flex items-center gap-2"><Ruler className="w-4 h-4" /> Sizes ({sizes.length})</span>
+                {showSizes ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+              {showSizes && (
+                <div className="p-4 space-y-2 bg-white">
+                  {sizes.map((size, index) => (
+                    <div key={size.id} className="flex items-center gap-2 p-2 bg-muted/30 rounded-lg">
+                      <input placeholder="Size name" value={size.name} onChange={e => updateSize(index, 'name', e.target.value)} className="flex-1 border border-border rounded px-2 py-1 text-sm" />
+                      <input placeholder="Dimensions" value={size.dimensions || ''} onChange={e => updateSize(index, 'dimensions', e.target.value)} className="w-32 border border-border rounded px-2 py-1 text-sm" />
+                      <button type="button" onClick={() => updateSize(index, 'is_default', !size.is_default)} className={`px-2 py-1 rounded text-[10px] font-medium ${size.is_default ? 'bg-purple-500 text-white' : 'bg-muted text-muted-foreground'}`}>Default</button>
+                      <button type="button" onClick={() => removeSize(index)} className="text-red-500 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={addSize} className="w-full py-2 border-2 border-dashed border-purple-300 rounded-lg text-purple-600 hover:bg-purple-50 transition text-sm font-medium">
+                    <Plus className="w-4 h-4 inline mr-1" /> Add Size
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-medium mb-1">Min Stock Level</label>
             <input type="number" min="0" value={form.min_stock_level} onChange={e => setForm({ ...form, min_stock_level: e.target.value })} className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" />

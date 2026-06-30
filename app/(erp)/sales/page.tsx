@@ -431,6 +431,8 @@ function CreateInvoiceModal({ customers, products, onClose, onSaved }: {
     notes: '',
     payment_type: 'credit' as 'credit' | 'partial' | 'full',
     amount_paid: 0,
+    payment_method: 'cash' as PaymentMethod,
+    payment_reference: '',
   });
   const [items, setItems] = useState<{ product_id: string; quantity: number; unit_price: number; discount_percent: number; selected_unit?: ProductUnit; base_quantity: number }[]>([]);
   const [saving, setSaving] = useState(false);
@@ -599,8 +601,9 @@ function CreateInvoiceModal({ customers, products, onClose, onSaved }: {
         reference_id: invoice.id,
         customer_id: form.customer_id,
         amount: amountPaid,
-        payment_method: 'cash',
+        payment_method: form.payment_method,
         payment_date: form.invoice_date,
+        reference_number: form.payment_reference || null,
         notes: form.payment_type === 'full' ? 'Full payment at invoice time' : 'Partial payment at invoice time',
       });
 
@@ -800,22 +803,53 @@ function CreateInvoiceModal({ customers, products, onClose, onSaved }: {
                 <p className="text-[10px] text-muted-foreground">Pay all now</p>
               </button>
             </div>
-            {form.payment_type === 'partial' && (
-              <div className="mt-3">
-                <label className="block text-xs mb-1">Payment Amount</label>
-                <input
-                  type="number"
-                  min="0.01"
-                  max={subtotal - 0.01}
-                  step="0.01"
-                  value={form.amount_paid}
-                  onChange={e => setForm({ ...form, amount_paid: parseFloat(e.target.value) || 0 })}
-                  className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20"
-                  placeholder={`Enter amount (Max: ${formatCurrency(subtotal)})`}
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Balance Due: {formatCurrency(subtotal - form.amount_paid)}
-                </p>
+            {(form.payment_type === 'partial' || form.payment_type === 'full') && (
+              <div className="mt-4 p-3 bg-green-50 rounded-lg border border-green-200 space-y-3">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium mb-1 text-green-800">Payment Method *</label>
+                    <select
+                      value={form.payment_method}
+                      onChange={e => setForm({ ...form, payment_method: e.target.value as PaymentMethod })}
+                      className="w-full border border-green-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20"
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="bank_transfer">Bank Transfer</option>
+                      <option value="card">Card (Credit/Debit)</option>
+                      <option value="mobile_banking">Mobile Banking</option>
+                      <option value="cheque">Cheque</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1 text-green-800">Reference / Transaction ID</label>
+                    <input
+                      type="text"
+                      value={form.payment_reference}
+                      onChange={e => setForm({ ...form, payment_reference: e.target.value })}
+                      className="w-full border border-green-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20"
+                      placeholder="e.g. Cheque #, Transaction ID"
+                    />
+                  </div>
+                </div>
+                {form.payment_type === 'partial' && (
+                  <div>
+                    <label className="block text-xs font-medium mb-1 text-green-800">Payment Amount *</label>
+                    <input
+                      type="number"
+                      min="0.01"
+                      max={subtotal - 0.01}
+                      step="0.01"
+                      value={form.amount_paid}
+                      onChange={e => setForm({ ...form, amount_paid: parseFloat(e.target.value) || 0 })}
+                      className="w-full border border-green-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20"
+                      placeholder={`Enter amount (Max: ${formatCurrency(subtotal)})`}
+                    />
+                    <p className="text-xs text-green-700 mt-1 font-medium">
+                      Balance Due After Payment: {formatCurrency(subtotal - form.amount_paid)}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -832,30 +832,48 @@ function ProductModal({ categories, brands, warehouses, product, onClose, onSave
               </button>
               {showUnits && (
                 <div className="p-4 space-y-3 bg-white">
-                  <div className="text-xs text-muted-foreground mb-2 flex items-start gap-2">
-                    <Info className="w-4 h-4 shrink-0 mt-0.5" />
-                    <span>Define units. The <strong>base unit</strong> is the smallest (stock tracked in this). Conversion factor = how many base units equal 1 of this unit. Example: 1 Box = 100 pieces means Box has conversion_factor = 100.</span>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
+                    <p className="text-xs text-blue-800 flex items-start gap-2">
+                      <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>
+                        <strong>How Multi-Unit Works:</strong> Define the different packaging units you sell this product in.
+                        The <strong>Base Unit</strong> is your smallest unit (stock is tracked in this). The <strong>Conversion Factor</strong> tells how many base units equal one of this unit.
+                        <br /><br />
+                        <strong>Example:</strong> For tiles, base unit = "Piece" (conversion=1). Sell unit = "Box" with conversion=50 means 1 Box = 50 Pieces. Price the Box at its selling price, not per piece.
+                      </span>
+                    </p>
                   </div>
+
+                  <div className="grid grid-cols-12 gap-2 px-2 py-1.5 bg-muted/50 rounded text-xs font-semibold text-muted-foreground">
+                    <div className="col-span-2">Unit Name</div>
+                    <div className="col-span-1">Short</div>
+                    <div className="col-span-1 text-right">Conv.</div>
+                    <div className="col-span-2 text-right">Sale Price</div>
+                    <div className="col-span-2 text-right">Cost Price</div>
+                    <div className="col-span-2 text-center">Flags</div>
+                    <div className="col-span-2"></div>
+                  </div>
+
                   {units.map((unit, index) => (
                     <div key={unit.id} className="grid grid-cols-12 gap-2 p-2 bg-muted/30 rounded-lg items-center">
                       <div className="col-span-2">
-                        <input placeholder="Unit name" value={unit.unit_name} onChange={e => updateUnit(index, 'unit_name', e.target.value)} className="w-full border border-border rounded px-2 py-1 text-sm" />
+                        <input placeholder="e.g. Box, Carton" value={unit.unit_name} onChange={e => updateUnit(index, 'unit_name', e.target.value)} className="w-full border border-border rounded px-2 py-1 text-sm" />
                       </div>
                       <div className="col-span-1">
-                        <input placeholder="Short" value={unit.unit_short || ''} onChange={e => updateUnit(index, 'unit_short', e.target.value)} className="w-full border border-border rounded px-2 py-1 text-sm" />
+                        <input placeholder="e.g. bx" value={unit.unit_short || ''} onChange={e => updateUnit(index, 'unit_short', e.target.value)} className="w-full border border-border rounded px-2 py-1 text-sm" />
                       </div>
                       <div className="col-span-1">
-                        <input type="number" placeholder="Conv." value={unit.conversion_factor} onChange={e => updateUnit(index, 'conversion_factor', parseFloat(e.target.value) || 1)} className="w-full border border-border rounded px-2 py-1 text-sm" />
+                        <input type="number" min="1" placeholder="1" value={unit.conversion_factor} onChange={e => updateUnit(index, 'conversion_factor', parseFloat(e.target.value) || 1)} className="w-full border border-border rounded px-2 py-1 text-sm text-right" />
                       </div>
                       <div className="col-span-2">
-                        <input type="number" placeholder="Sale Price" value={unit.price} onChange={e => updateUnit(index, 'price', parseFloat(e.target.value) || 0)} className="w-full border border-border rounded px-2 py-1 text-sm" />
+                        <input type="number" min="0" step="0.01" placeholder="0.00" value={unit.price} onChange={e => updateUnit(index, 'price', parseFloat(e.target.value) || 0)} className="w-full border border-border rounded px-2 py-1 text-sm text-right" />
                       </div>
                       <div className="col-span-2">
-                        <input type="number" placeholder="Cost Price" value={unit.cost_price} onChange={e => updateUnit(index, 'cost_price', parseFloat(e.target.value) || 0)} className="w-full border border-border rounded px-2 py-1 text-sm" />
+                        <input type="number" min="0" step="0.01" placeholder="0.00" value={unit.cost_price} onChange={e => updateUnit(index, 'cost_price', parseFloat(e.target.value) || 0)} className="w-full border border-border rounded px-2 py-1 text-sm text-right" />
                       </div>
-                      <div className="col-span-2 flex gap-1 flex-wrap">
-                        <button type="button" onClick={() => updateUnit(index, 'is_base_unit', !unit.is_base_unit)} className={`px-2 py-1 rounded text-[10px] font-medium ${unit.is_base_unit ? 'bg-green-500 text-white' : 'bg-muted text-muted-foreground'}`}>Base</button>
-                        <button type="button" onClick={() => updateUnit(index, 'is_sale_unit', !unit.is_sale_unit)} className={`px-2 py-1 rounded text-[10px] font-medium ${unit.is_sale_unit ? 'bg-blue-500 text-white' : 'bg-muted text-muted-foreground'}`}>Sale</button>
+                      <div className="col-span-2 flex gap-1 flex-wrap justify-center">
+                        <button type="button" onClick={() => updateUnit(index, 'is_base_unit', !unit.is_base_unit)} className={`px-2 py-1 rounded text-[10px] font-medium transition ${unit.is_base_unit ? 'bg-green-500 text-white' : 'bg-muted text-muted-foreground hover:bg-green-100 hover:text-green-700'}`} title="Base unit is the smallest unit. Stock is tracked in base units.">Base</button>
+                        <button type="button" onClick={() => updateUnit(index, 'is_sale_unit', !unit.is_sale_unit)} className={`px-2 py-1 rounded text-[10px] font-medium transition ${unit.is_sale_unit ? 'bg-blue-500 text-white' : 'bg-muted text-muted-foreground hover:bg-blue-100 hover:text-blue-700'}`} title="Default unit shown in sales/POS.">Sale</button>
                       </div>
                       <div className="col-span-2 flex justify-end">
                         <button type="button" onClick={() => removeUnit(index)} className="text-red-500 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
@@ -873,21 +891,43 @@ function ProductModal({ categories, brands, warehouses, product, onClose, onSave
           {form.enable_colors && (
             <div className="border border-border rounded-lg overflow-hidden">
               <button type="button" onClick={() => setShowColors(!showColors)} className="w-full flex items-center justify-between px-4 py-3 bg-pink-50 text-pink-700 hover:bg-pink-100 transition">
-                <span className="font-medium text-sm flex items-center gap-2"><Palette className="w-4 h-4" /> Colors ({colors.length})</span>
+                <span className="font-medium text-sm flex items-center gap-2"><Palette className="w-4 h-4" /> Color Variants ({colors.length})</span>
                 {showColors ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
               {showColors && (
-                <div className="p-4 space-y-2 bg-white">
+                <div className="p-4 space-y-3 bg-white">
+                  <div className="bg-pink-50 border border-pink-200 rounded-lg p-3 mb-3">
+                    <p className="text-xs text-pink-800 flex items-start gap-2">
+                      <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>
+                        <strong>Color Variants:</strong> Use this when the product comes in different colors (e.g., a faucet in Chrome, Matte Black, Gold). Each color can have its own image. Set one as <strong>Default</strong> to show it first in catalogs.
+                      </span>
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-5 gap-2 px-2 py-1.5 bg-muted/50 rounded text-xs font-semibold text-muted-foreground">
+                    <div className="col-span-1">Color</div>
+                    <div className="col-span-2">Color Name</div>
+                    <div className="col-span-1 text-center">Default</div>
+                    <div className="col-span-1"></div>
+                  </div>
                   {colors.map((color, index) => (
-                    <div key={color.id} className="flex items-center gap-2 p-2 bg-muted/30 rounded-lg">
-                      <input type="color" value={color.hex_code || '#000000'} onChange={e => updateColor(index, 'hex_code', e.target.value)} className="w-8 h-8 rounded cursor-pointer" />
-                      <input placeholder="Color name" value={color.name} onChange={e => updateColor(index, 'name', e.target.value)} className="flex-1 border border-border rounded px-2 py-1 text-sm" />
-                      <button type="button" onClick={() => updateColor(index, 'is_default', !color.is_default)} className={`px-2 py-1 rounded text-[10px] font-medium ${color.is_default ? 'bg-pink-500 text-white' : 'bg-muted text-muted-foreground'}`}>Default</button>
-                      <button type="button" onClick={() => removeColor(index)} className="text-red-500 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                    <div key={color.id} className="grid grid-cols-5 gap-2 p-2 bg-muted/30 rounded-lg items-center">
+                      <div className="col-span-1">
+                        <input type="color" value={color.hex_code || '#000000'} onChange={e => updateColor(index, 'hex_code', e.target.value)} className="w-8 h-8 rounded cursor-pointer border border-border" title="Pick color" />
+                      </div>
+                      <div className="col-span-2">
+                        <input placeholder="e.g. Matte Black" value={color.name} onChange={e => updateColor(index, 'name', e.target.value)} className="w-full border border-border rounded px-2 py-1 text-sm" />
+                      </div>
+                      <div className="col-span-1 flex justify-center">
+                        <button type="button" onClick={() => updateColor(index, 'is_default', !color.is_default)} className={`px-2 py-1 rounded text-[10px] font-medium transition ${color.is_default ? 'bg-pink-500 text-white' : 'bg-muted text-muted-foreground hover:bg-pink-100 hover:text-pink-700'}`} title="Set as default color">Default</button>
+                      </div>
+                      <div className="col-span-1 flex justify-end">
+                        <button type="button" onClick={() => removeColor(index)} className="text-red-500 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                      </div>
                     </div>
                   ))}
                   <button type="button" onClick={addColor} className="w-full py-2 border-2 border-dashed border-pink-300 rounded-lg text-pink-600 hover:bg-pink-50 transition text-sm font-medium">
-                    <Plus className="w-4 h-4 inline mr-1" /> Add Color
+                    <Plus className="w-4 h-4 inline mr-1" /> Add Color Variant
                   </button>
                 </div>
               )}
@@ -897,21 +937,43 @@ function ProductModal({ categories, brands, warehouses, product, onClose, onSave
           {form.enable_sizes && (
             <div className="border border-border rounded-lg overflow-hidden">
               <button type="button" onClick={() => setShowSizes(!showSizes)} className="w-full flex items-center justify-between px-4 py-3 bg-purple-50 text-purple-700 hover:bg-purple-100 transition">
-                <span className="font-medium text-sm flex items-center gap-2"><Ruler className="w-4 h-4" /> Sizes ({sizes.length})</span>
+                <span className="font-medium text-sm flex items-center gap-2"><Ruler className="w-4 h-4" /> Size Variants ({sizes.length})</span>
                 {showSizes ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
               {showSizes && (
-                <div className="p-4 space-y-2 bg-white">
+                <div className="p-4 space-y-3 bg-white">
+                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-3">
+                    <p className="text-xs text-purple-800 flex items-start gap-2">
+                      <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>
+                        <strong>Size Variants:</strong> Use for products sold in different sizes (e.g., towels in S/M/L, tiles in 12x12 or 24x24). The <strong>Dimensions</strong> field can store measurements like "60x60 cm".
+                      </span>
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-5 gap-2 px-2 py-1.5 bg-muted/50 rounded text-xs font-semibold text-muted-foreground">
+                    <div className="col-span-2">Size Name</div>
+                    <div className="col-span-1">Dimensions</div>
+                    <div className="col-span-1 text-center">Default</div>
+                    <div className="col-span-1"></div>
+                  </div>
                   {sizes.map((size, index) => (
-                    <div key={size.id} className="flex items-center gap-2 p-2 bg-muted/30 rounded-lg">
-                      <input placeholder="Size name" value={size.name} onChange={e => updateSize(index, 'name', e.target.value)} className="flex-1 border border-border rounded px-2 py-1 text-sm" />
-                      <input placeholder="Dimensions" value={size.dimensions || ''} onChange={e => updateSize(index, 'dimensions', e.target.value)} className="w-32 border border-border rounded px-2 py-1 text-sm" />
-                      <button type="button" onClick={() => updateSize(index, 'is_default', !size.is_default)} className={`px-2 py-1 rounded text-[10px] font-medium ${size.is_default ? 'bg-purple-500 text-white' : 'bg-muted text-muted-foreground'}`}>Default</button>
-                      <button type="button" onClick={() => removeSize(index)} className="text-red-500 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                    <div key={size.id} className="grid grid-cols-5 gap-2 p-2 bg-muted/30 rounded-lg items-center">
+                      <div className="col-span-2">
+                        <input placeholder="e.g. Small, 12x12" value={size.name} onChange={e => updateSize(index, 'name', e.target.value)} className="w-full border border-border rounded px-2 py-1 text-sm" />
+                      </div>
+                      <div className="col-span-1">
+                        <input placeholder="e.g. 60x60" value={size.dimensions || ''} onChange={e => updateSize(index, 'dimensions', e.target.value)} className="w-full border border-border rounded px-2 py-1 text-sm" />
+                      </div>
+                      <div className="col-span-1 flex justify-center">
+                        <button type="button" onClick={() => updateSize(index, 'is_default', !size.is_default)} className={`px-2 py-1 rounded text-[10px] font-medium transition ${size.is_default ? 'bg-purple-500 text-white' : 'bg-muted text-muted-foreground hover:bg-purple-100 hover:text-purple-700'}`} title="Set as default size">Default</button>
+                      </div>
+                      <div className="col-span-1 flex justify-end">
+                        <button type="button" onClick={() => removeSize(index)} className="text-red-500 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                      </div>
                     </div>
                   ))}
                   <button type="button" onClick={addSize} className="w-full py-2 border-2 border-dashed border-purple-300 rounded-lg text-purple-600 hover:bg-purple-50 transition text-sm font-medium">
-                    <Plus className="w-4 h-4 inline mr-1" /> Add Size
+                    <Plus className="w-4 h-4 inline mr-1" /> Add Size Variant
                   </button>
                 </div>
               )}

@@ -581,7 +581,6 @@ function ConvertToInvoiceModal({ quotation, onClose, onConverted }: {
         tax_amount: quotation.tax_amount,
         total_amount: totalAmount,
         amount_paid: effectiveAmountPaid,
-        balance_due: balanceDue,
         status: invoiceStatus,
         is_pos: false,
       })

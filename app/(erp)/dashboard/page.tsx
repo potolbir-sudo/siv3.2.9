@@ -8,11 +8,7 @@ import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
-import {
-  ShoppingCart, TrendingUp, Package, Truck, Receipt, CreditCard,
-  FileText, FolderKanban, ArrowUpRight, Clock, CheckCircle2, XCircle,
-  Users, ShoppingBag
-} from 'lucide-react';
+import { ShoppingCart, TrendingUp, Package, Truck, Receipt, CreditCard, FileText, FolderKanban, ArrowUpRight, Clock, CircleCheck as CheckCircle2, Circle as XCircle, Users, ShoppingBag } from 'lucide-react';
 import type { Customer } from '@/lib/types';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#6b7280'];
@@ -36,12 +32,14 @@ const activityIcons: Record<string, { icon: React.ElementType; color: string }> 
 };
 
 const quickActions = [
-  { label: 'New Sale', href: '/sales', icon: ShoppingCart, color: 'bg-blue-50 text-blue-600 border-blue-200' },
-  { label: 'New Purchase', href: '/purchases', icon: ShoppingBag, color: 'bg-green-50 text-green-600 border-green-200' },
-  { label: 'New Quotation', href: '/quotations', icon: FileText, color: 'bg-orange-50 text-orange-600 border-orange-200' },
-  { label: 'New Customer', href: '/crm', icon: Users, color: 'bg-teal-50 text-teal-600 border-teal-200' },
-  { label: 'New Delivery', href: '/delivery', icon: Truck, color: 'bg-purple-50 text-purple-600 border-purple-200' },
-  { label: 'New Expense', href: '/accounting', icon: CreditCard, color: 'bg-red-50 text-red-600 border-red-200' },
+  { label: 'New Sale', href: '/sales', icon: ShoppingCart, bg: 'bg-blue-500', ring: 'ring-blue-200' },
+  { label: 'New Purchase', href: '/purchases', icon: ShoppingBag, bg: 'bg-emerald-500', ring: 'ring-emerald-200' },
+  { label: 'New Quotation', href: '/quotations', icon: FileText, bg: 'bg-orange-500', ring: 'ring-orange-200' },
+  { label: 'New Customer', href: '/crm', icon: Users, bg: 'bg-teal-500', ring: 'ring-teal-200' },
+  { label: 'New Delivery', href: '/delivery', icon: Truck, bg: 'bg-purple-500', ring: 'ring-purple-200' },
+  { label: 'New Expense', href: '/accounting', icon: CreditCard, bg: 'bg-rose-500', ring: 'ring-rose-200' },
+  { label: 'POS Sale', href: '/sales/pos', icon: Receipt, bg: 'bg-indigo-500', ring: 'ring-indigo-200' },
+  { label: 'Projects', href: '/projects', icon: FolderKanban, bg: 'bg-amber-500', ring: 'ring-amber-200' },
 ];
 
 export default function DashboardPage() {
@@ -218,6 +216,25 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Quick Actions — horizontal strip */}
+      <div className="bg-white rounded-xl border border-border shadow-sm p-4">
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">Quick Actions</p>
+        <div className="grid grid-cols-4 sm:grid-cols-8 gap-3">
+          {quickActions.map((action) => (
+            <Link
+              key={action.label}
+              href={action.href}
+              className="group flex flex-col items-center gap-2"
+            >
+              <div className={`w-12 h-12 rounded-2xl ${action.bg} ring-4 ${action.ring} ring-offset-1 flex items-center justify-center shadow-sm group-hover:scale-110 group-hover:shadow-md transition-all duration-200`}>
+                <action.icon className="w-5 h-5 text-white" />
+              </div>
+              <span className="text-[11px] font-medium text-muted-foreground group-hover:text-foreground transition-colors text-center leading-tight">{action.label}</span>
+            </Link>
+          ))}
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {kpis.map((kpi) => (
           <div key={kpi.label} className="stat-card group cursor-default">
@@ -348,22 +365,6 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl border border-border p-5 shadow-sm">
-          <h3 className="text-sm font-semibold text-foreground mb-3">Quick Actions</h3>
-          <div className="grid grid-cols-2 gap-2">
-            {quickActions.map((action) => (
-              <Link
-                key={action.label}
-                href={action.href}
-                className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 ${action.color} hover:opacity-80 transition-opacity text-center`}
-              >
-                <action.icon className="w-5 h-5" />
-                <span className="text-[11px] font-semibold leading-tight">{action.label}</span>
-              </Link>
-            ))}
-          </div>
-        </div>
-
-        <div className="bg-white rounded-xl border border-border p-5 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-foreground">Low Stock Alert</h3>
             <Link href="/inventory" className="text-xs text-blue-600 hover:underline font-medium">View all</Link>
@@ -420,15 +421,23 @@ export default function DashboardPage() {
             <Link href="/reports" className="text-xs text-blue-600 hover:underline font-medium">View all</Link>
           </div>
           <div className="space-y-3">
-            {(recentActivities.length > 0 ? recentActivities : []).slice(0, 6).map((log: any, i: number) => {
+            {recentActivities.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-6 text-center">
+                <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center mb-2">
+                  <Clock className="w-4 h-4 text-muted-foreground" />
+                </div>
+                <p className="text-xs text-muted-foreground">No recent activity yet</p>
+                <p className="text-[10px] text-muted-foreground/70 mt-0.5">Activity will appear as you use the system</p>
+              </div>
+            ) : recentActivities.slice(0, 6).map((log: any, i: number) => {
               const cfg = activityIcons[log.entity_type] || activityIcons.invoice;
               return (
                 <div key={i} className="flex items-start gap-2.5">
-                  <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${cfg.color}`}>
-                    <cfg.icon className="w-3 h-3" />
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${cfg.color}`}>
+                    <cfg.icon className="w-3.5 h-3.5" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[11px] text-foreground leading-snug">{log.entity_label}</p>
+                    <p className="text-[11px] text-foreground leading-snug font-medium">{log.entity_label}</p>
                     <p className="text-[10px] text-muted-foreground mt-0.5">{formatRelativeTime(log.created_at)}</p>
                   </div>
                 </div>

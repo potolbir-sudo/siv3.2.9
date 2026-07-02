@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, Package, ShoppingCart, ShoppingBag, Users, FolderKanban, Truck, Calculator, Store, UserRound, ChartBar as BarChart3, Settings, Building2, ChevronDown, ChevronRight, FileText, Receipt, TrendingUp, Boxes, Shield, ArrowRightLeft } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, ShoppingBag, Users, FolderKanban, Truck, Calculator, Store, UserRound, ChartBar as BarChart3, Settings, Building2, ChevronDown, ChevronRight, FileText, Receipt, TrendingUp, Boxes, Shield, ArrowRightLeft, BookOpen } from 'lucide-react';
 
 interface NavItem {
   title: string;
@@ -16,6 +16,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { title: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { title: 'Guide', href: '/guide', icon: BookOpen },
   {
     title: 'Inventory',
     icon: Package,
